@@ -7,4 +7,14 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  server: {
+    watch: {
+      usePolling: true,
+      interval: 1000,
+    },
+    fs: {
+      strict: false,
+      allow: ['..'],
+    },
+  },
 });

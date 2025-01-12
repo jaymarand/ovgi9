@@ -10,6 +10,11 @@ const navItems = [
     label: 'Driver Dashboard'
   },
   {
+    to: '/driver-management',
+    icon: Users,
+    label: 'Driver Management'
+  },
+  {
     to: '/dispatch-dashboard',
     icon: Users,
     label: 'Dispatch Dashboard'
