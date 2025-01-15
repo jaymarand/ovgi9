@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Users, Truck, Package, AlertCircle, Plus } from 'lucide-react';
+import { Users, Truck, Package, AlertCircle, Plus, ChevronDown } from 'lucide-react';
+
+interface Store {
+  id: string;
+  store_name: string;
+  department_number: string;
+}
 
 interface DeliveryRun {
   id: string;
@@ -11,17 +17,18 @@ interface DeliveryRun {
   department_number: string;
   status: 'pending' | 'loading' | 'preloaded' | 'in_transit' | 'complete' | 'cancelled';
   type: 'Box Truck' | 'Tractor Trailer';
-  sleeves: number;
-  caps: number;
-  canvases: number;
-  totes: number;
-  hardlines_raw: number;
-  softlines_raw: number;
+  sleeves_needed: number;
+  caps_needed: number;
+  canvases_needed: number;
+  totes_needed: number;
+  hardlines_needed: number;
+  softlines_needed: number;
   fl_driver: string;
   start_time: string | null;
   preload_time: string | null;
   complete_time: string | null;
   depart_time: string | null;
+  run_type: string;
 }
 
 type RunType = 'All Runs' | 'Box Truck Runs' | 'Tractor Trailer Runs';
@@ -30,12 +37,15 @@ type RunTime = 'Morning Runs' | 'Afternoon Runs' | 'ADC Runs';
 export function DispatchDashboard() {
   const { user } = useAuth();
   const [runs, setRuns] = useState<DeliveryRun[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<RunType>('All Runs');
+  const [showStoreDropdown, setShowStoreDropdown] = useState<string | null>(null); // timeSlot when dropdown is open
 
   useEffect(() => {
     fetchRuns();
+    fetchStores();
     setupRealtimeSubscription();
   }, []);
 
@@ -56,10 +66,24 @@ export function DispatchDashboard() {
     };
   };
 
+  const fetchStores = async () => {
+    try {
+      const { data, error: storesError } = await supabase
+        .from('stores')
+        .select('*')
+        .order('store_name');
+
+      if (storesError) throw storesError;
+      setStores(data || []);
+    } catch (err) {
+      setError('Failed to fetch stores');
+    }
+  };
+
   const fetchRuns = async () => {
     try {
       const { data, error: runsError } = await supabase
-        .from('active_delivery_runs')
+        .from('run_supply_needs')
         .select('*')
         .order('created_at', { ascending: false });
 
@@ -69,6 +93,31 @@ export function DispatchDashboard() {
       setError('Failed to fetch delivery runs');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const addRun = async (store: Store, timeSlot: string) => {
+    try {
+      // Extract the run type and keep proper case
+      const runType = timeSlot.split(' ')[0]; // This will be "Morning", "Afternoon", or "ADC"
+      
+      const { data, error: addError } = await supabase.rpc('add_delivery_run', {
+        p_run_type: runType,
+        p_store_id: store.id,
+        p_store_name: store.store_name,
+        p_department_number: store.department_number,
+        p_truck_type: 'box_truck'
+      });
+
+      if (addError) {
+        console.error('Add run error:', addError);
+        throw addError;
+      }
+      setShowStoreDropdown(null);
+      await fetchRuns();
+    } catch (err) {
+      console.error('Failed to add run:', err);
+      setError('Failed to add run');
     }
   };
 
@@ -102,23 +151,10 @@ export function DispatchDashboard() {
   };
 
   const groupRunsByTime = (runs: DeliveryRun[]): Record<RunTime, DeliveryRun[]> => {
-    const morning = runs.filter(run => {
-      const startHour = run.start_time ? new Date(run.start_time).getHours() : 0;
-      return startHour >= 4 && startHour < 12;
-    });
-    const afternoon = runs.filter(run => {
-      const startHour = run.start_time ? new Date(run.start_time).getHours() : 0;
-      return startHour >= 12 && startHour < 20;
-    });
-    const adc = runs.filter(run => {
-      const startHour = run.start_time ? new Date(run.start_time).getHours() : 0;
-      return startHour >= 20 || startHour < 4;
-    });
-
     return {
-      'Morning Runs': morning,
-      'Afternoon Runs': afternoon,
-      'ADC Runs': adc
+      'Morning Runs': runs.filter(run => run.run_type === 'Morning'),
+      'Afternoon Runs': runs.filter(run => run.run_type === 'Afternoon'),
+      'ADC Runs': runs.filter(run => run.run_type === 'ADC')
     };
   };
 
@@ -202,12 +238,12 @@ export function DispatchDashboard() {
                           {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.sleeves}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.caps}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.canvases}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.totes}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.hardlines_raw}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.softlines_raw}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{run.sleeves_needed}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{run.caps_needed}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{run.canvases_needed}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{run.totes_needed}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{run.hardlines_needed}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{run.softlines_needed}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">{run.fl_driver || '--'}</td>
                       <td className="px-4 py-3 text-sm text-blue-600">{formatTime(run.start_time)}</td>
                       <td className="px-4 py-3 text-sm text-blue-600">{formatTime(run.preload_time)}</td>
@@ -219,10 +255,31 @@ export function DispatchDashboard() {
               </table>
             </div>
             <div className="p-4 border-t border-gray-200">
-              <button className="flex items-center justify-center w-full py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-md">
-                <Plus className="h-4 w-4 mr-1" />
-                Add Run
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowStoreDropdown(showStoreDropdown === timeSlot ? null : timeSlot)}
+                  className="flex items-center justify-center w-full py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-md"
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  {showStoreDropdown === timeSlot ? 'Select Store' : 'Add Run'}
+                  {showStoreDropdown === timeSlot && (
+                    <ChevronDown className="h-4 w-4 ml-1" />
+                  )}
+                </button>
+                {showStoreDropdown === timeSlot && (
+                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-white rounded-md shadow-lg border border-gray-200 max-h-60 overflow-y-auto z-10">
+                    {stores.map((store) => (
+                      <button
+                        key={store.id}
+                        onClick={() => addRun(store, timeSlot)}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
+                      >
+                        {store.store_name} - {store.department_number}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
