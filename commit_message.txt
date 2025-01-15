@@ -1,0 +1,29 @@
+fix: persist driver assignments and update view structure
+
+Changes made:
+1. Fixed run_supply_needs view to:
+   - Remove date filter to show all active runs
+   - Update column names to match table structure
+   - Add updated_at field for tracking changes
+   - Fix supply needs calculations
+
+2. Updated DispatchDashboard.tsx to:
+   - Update DeliveryRun interface to match view structure
+   - Fix status filter to use 'cancelled' instead of 'complete'
+   - Improve error handling in driver assignment
+
+3. Database changes:
+   - Added new migration for fixing run_supply_needs view
+   - Removed date filtering to persist all runs
+   - Updated column references to match table structure
+
+Technical Details:
+- Changed fl_driver_id column usage in view and frontend
+- Updated supply needs calculations in view
+- Fixed status enum handling in queries
+- Added proper type definitions for run statuses
+
+Testing Notes:
+- Driver assignments now persist after page navigation
+- All non-cancelled runs are visible
+- Supply needs calculations work correctly

@@ -9,28 +9,32 @@ interface Store {
   department_number: string;
 }
 
-interface DeliveryRun {
+interface Driver {
   id: string;
-  driver: string;
-  store_id: string;
+  name: string;
+}
+
+interface DeliveryRun {
+  run_id: string;
   store_name: string;
   department_number: string;
-  status: 'upcoming' | 'loading' | 'preloaded' | 'in_transit' | 'complete' | 'cancelled';
-  type: 'Box Truck' | 'Tractor Trailer';
+  run_type: string;
+  type: string;
+  status: string;
+  position: number;
+  fl_driver_id: string | null;
+  start_time: string | null;
+  preload_time: string | null;
+  complete_time: string | null;
+  depart_time: string | null;
+  created_at: string;
+  updated_at: string;
   sleeves_needed: number;
   caps_needed: number;
   canvases_needed: number;
   totes_needed: number;
   hardlines_needed: number;
   softlines_needed: number;
-  fl_driver: string;
-  start_time: string | null;
-  preload_time: string | null;
-  complete_time: string | null;
-  depart_time: string | null;
-  run_type: 'morning_runs' | 'afternoon_runs' | 'adc_runs';
-  run_id: string;
-  position: number;
 }
 
 type RunType = 'All Runs' | 'Box Truck Runs' | 'Tractor Trailer Runs';
@@ -66,6 +70,7 @@ export function DispatchDashboard() {
   const { user } = useAuth();
   const [runs, setRuns] = useState<DeliveryRun[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
+  const [activeDrivers, setActiveDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<RunType>('All Runs');
@@ -74,6 +79,7 @@ export function DispatchDashboard() {
   useEffect(() => {
     fetchRuns();
     fetchStores();
+    fetchActiveDrivers();
     setupRealtimeSubscription();
   }, []);
 
@@ -83,7 +89,8 @@ export function DispatchDashboard() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'active_delivery_runs' },
-        () => {
+        (payload) => {
+          console.log('Realtime update received:', payload);
           fetchRuns();
         }
       )
@@ -110,17 +117,40 @@ export function DispatchDashboard() {
 
   const fetchRuns = async () => {
     try {
+      console.log('Fetching runs...');
       const { data, error: runsError } = await supabase
         .from('run_supply_needs')
         .select('*')
+        .neq('status', 'cancelled')
         .order('created_at', { ascending: false });
 
       if (runsError) throw runsError;
+      console.log('Fetched runs:', data);
       setRuns(data || []);
     } catch (err) {
+      console.error('Failed to fetch delivery runs:', err);
       setError('Failed to fetch delivery runs');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchActiveDrivers = async () => {
+    try {
+      const { data, error: driversError } = await supabase
+        .from('drivers')
+        .select('id, first_name, last_name')
+        .eq('is_active', true)
+        .order('first_name');
+
+      if (driversError) throw driversError;
+      setActiveDrivers(data?.map(d => ({
+        id: d.id,
+        name: `${d.first_name} ${d.last_name}`
+      })) || []);
+    } catch (err) {
+      console.error('Failed to fetch drivers:', err);
+      setError('Failed to fetch drivers');
     }
   };
 
@@ -179,6 +209,44 @@ export function DispatchDashboard() {
     } catch (err) {
       console.error('Failed to update vehicle type:', err);
       setError('Failed to update vehicle type');
+    }
+  };
+
+  const handleDriverAssignment = async (runId: string, driverId: string | null) => {
+    try {
+      // Optimistically update the UI
+      setRuns(prevRuns => prevRuns.map(run => 
+        run.run_id === runId ? { ...run, fl_driver_id: driverId } : run
+      ));
+
+      const { error: assignError } = await supabase
+        .rpc('assign_driver_to_run', {
+          p_run_id: runId,
+          p_driver_id: driverId
+        });
+
+      if (assignError) throw assignError;
+
+      // Fetch the updated run to ensure we have the latest data
+      const { data: updatedRun, error: fetchError } = await supabase
+        .from('run_supply_needs')
+        .select('*')
+        .eq('run_id', runId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Update the specific run with the latest data
+      if (updatedRun) {
+        setRuns(prevRuns => prevRuns.map(run => 
+          run.run_id === runId ? { ...run, ...updatedRun } : run
+        ));
+      }
+    } catch (err) {
+      console.error('Error assigning driver:', err);
+      setError('Failed to assign driver');
+      // Revert the optimistic update on error
+      await fetchRuns();
     }
   };
 
@@ -344,7 +412,20 @@ export function DispatchDashboard() {
                       <td className="px-4 py-3 text-sm text-center text-gray-900">{run.totes_needed}</td>
                       <td className="px-4 py-3 text-sm text-center text-gray-900">{run.hardlines_needed}</td>
                       <td className="px-4 py-3 text-sm text-center text-gray-900">{run.softlines_needed}</td>
-                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.fl_driver || '--'}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">
+                        <select
+                          value={run.fl_driver_id || ''}
+                          onChange={(e) => handleDriverAssignment(run.run_id, e.target.value || null)}
+                          className="block w-40 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md"
+                        >
+                          <option value="">Select Driver</option>
+                          {activeDrivers.map((driver) => (
+                            <option key={driver.id} value={driver.id}>
+                              {driver.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="px-4 py-3 text-sm text-center text-gray-900">{formatTime(run.start_time)}</td>
                       <td className="px-4 py-3 text-sm text-center text-gray-900">{formatTime(run.preload_time)}</td>
                       <td className="px-4 py-3 text-sm text-center text-gray-900">{formatTime(run.complete_time)}</td>
