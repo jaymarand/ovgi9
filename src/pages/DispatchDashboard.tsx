@@ -80,7 +80,28 @@ export function DispatchDashboard() {
     fetchRuns();
     fetchStores();
     fetchActiveDrivers();
-    setupRealtimeSubscription();
+
+    // Subscribe to changes in active_delivery_runs
+    const runsSubscription = supabase
+      .channel('active_delivery_runs_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'active_delivery_runs'
+        },
+        (payload) => {
+          console.log('Run update received:', payload);
+          // Refresh the runs data when any change occurs
+          fetchRuns();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(runsSubscription);
+    };
   }, []);
 
   const setupRealtimeSubscription = () => {
