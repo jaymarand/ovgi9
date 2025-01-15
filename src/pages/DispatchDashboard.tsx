@@ -253,15 +253,16 @@ export function DispatchDashboard() {
   const getStatusColor = (status: DeliveryRun['status']) => {
     switch (status) {
       case 'complete':
-        return 'text-green-600 bg-green-50';
-      case 'cancelled':
-        return 'text-red-600 bg-red-50';
-      case 'preloaded':
-        return 'text-yellow-600 bg-yellow-50';
+        return 'bg-green-100';
       case 'in_transit':
-        return 'text-blue-600 bg-blue-50';
+        return 'bg-blue-100';
+      case 'preloaded':
+        return 'bg-yellow-100';
+      case 'loading':
+        return 'bg-orange-100';
+      case 'upcoming':
       default:
-        return 'text-gray-600 bg-gray-50';
+        return 'bg-white';
     }
   };
 
@@ -386,7 +387,7 @@ export function DispatchDashboard() {
                     </td>
                   </tr>
                   {runsInSlot.map((run) => (
-                    <tr key={`run-${run.run_id || run.id}`} className="hover:bg-gray-50">
+                    <tr key={`run-${run.run_id || run.id}`} className={`${getStatusColor(run.status)} transition-colors duration-150`}>
                       <td className="px-4 py-3 text-sm text-gray-900">{run.store_name}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">
                         <div className="flex items-center justify-center">
@@ -402,7 +403,7 @@ export function DispatchDashboard() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(run.status)}`}>
+                        <span className="px-2 py-1 text-xs font-medium rounded-full text-gray-900">
                           {run.status.charAt(0).toUpperCase() + run.status.slice(1).replace('_', ' ')}
                         </span>
                       </td>
