@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { toast } from 'react-hot-toast';
 
 interface Driver {
   id: string;
@@ -61,24 +60,19 @@ export function DriverManagement() {
   const fetchDrivers = async () => {
     try {
       setLoading(true);
-      console.log('Fetching drivers...');
+      setError(null);
 
-      const { data, error, count } = await supabase
+      const { data, error: fetchError } = await supabase
         .from('drivers')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('Error fetching drivers:', error);
-        throw error;
-      }
+      if (fetchError) throw fetchError;
 
-      console.log('Fetched drivers:', data);
       setDrivers(data || []);
     } catch (err: any) {
-      console.error('Error in fetchDrivers:', err);
+      console.error('Error fetching drivers:', err);
       setError(err.message);
-      toast.error(`Error loading drivers: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -87,20 +81,21 @@ export function DriverManagement() {
   const toggleDriverStatus = async (driver: Driver) => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      setError(null);
+
+      const { error: updateError } = await supabase
         .from('drivers')
         .update({ is_active: !driver.is_active })
         .eq('id', driver.id)
         .select()
         .single();
 
-      if (error) throw error;
+      if (updateError) throw updateError;
 
       setDrivers(drivers.map(d => d.id === driver.id ? { ...d, is_active: !d.is_active } : d));
-      toast.success(`Driver ${driver.is_active ? 'deactivated' : 'activated'} successfully`);
     } catch (err: any) {
-      console.error('Error toggling driver status:', err);
-      toast.error(`Error updating driver status: ${err.message}`);
+      console.error('Error updating driver status:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -109,8 +104,8 @@ export function DriverManagement() {
   const updateDriverCDL = async (driver: Driver, hasCDL: boolean, cdlNumber?: string, cdlExpirationDate?: string) => {
     try {
       setLoading(true);
+      setError(null);
 
-      // Validate CDL data if has_cdl is true
       if (hasCDL) {
         if (!cdlNumber?.trim()) {
           throw new Error('CDL number is required when CDL is enabled');
@@ -119,7 +114,6 @@ export function DriverManagement() {
           throw new Error('CDL expiration date is required when CDL is enabled');
         }
 
-        // Validate expiration date is in the future
         const expirationDate = new Date(cdlExpirationDate);
         if (expirationDate <= new Date()) {
           throw new Error('CDL expiration date must be in the future');
@@ -132,21 +126,20 @@ export function DriverManagement() {
         cdl_expiration_date: hasCDL ? cdlExpirationDate : null
       };
 
-      const { data, error } = await supabase
+      const { error: updateError } = await supabase
         .from('drivers')
         .update(updateData)
         .eq('id', driver.id)
         .select()
         .single();
 
-      if (error) throw error;
+      if (updateError) throw updateError;
 
       setDrivers(drivers.map(d => d.id === driver.id ? { ...d, ...updateData } : d));
       setEditingDriver(null);
-      toast.success('Driver CDL information updated successfully');
     } catch (err: any) {
       console.error('Error updating driver CDL:', err);
-      toast.error(`Error updating driver CDL: ${err.message}`);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -157,16 +150,13 @@ export function DriverManagement() {
       setLoading(true);
       setError(null);
 
-      // Format names to proper case
       const firstName = toProperCase(formData.firstName);
       const lastName = toProperCase(formData.lastName);
 
-      // Validate email format
       if (!validateEmail(formData.email)) {
         throw new Error('Please enter a valid email address');
       }
 
-      // Validate CDL data if has_cdl is true
       if (formData.hasCDL) {
         if (!formData.cdlNumber?.trim()) {
           throw new Error('CDL number is required when CDL is enabled');
@@ -175,15 +165,13 @@ export function DriverManagement() {
           throw new Error('CDL expiration date is required when CDL is enabled');
         }
 
-        // Validate expiration date is in the future
         const expirationDate = new Date(formData.cdlExpirationDate);
         if (expirationDate <= new Date()) {
           throw new Error('CDL expiration date must be in the future');
         }
       }
 
-      // Insert directly into drivers table
-      const { data: result, error: createError } = await supabase
+      const { error: createError } = await supabase
         .from('drivers')
         .insert([
           {
@@ -199,19 +187,13 @@ export function DriverManagement() {
         .select()
         .single();
 
-      if (createError) {
-        console.error('Error creating driver:', createError);
-        throw createError;
-      }
+      if (createError) throw createError;
 
-      console.log('Driver created successfully:', result);
       setShowModal(false);
-      toast.success('Driver created successfully!');
       await fetchDrivers();
-    } catch (error: any) {
-      console.error('Error creating driver:', error);
-      setError(error.message);
-      toast.error(`Error creating driver: ${error.message}`);
+    } catch (err: any) {
+      console.error('Error creating driver:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -388,7 +370,7 @@ export function DriverManagement() {
                       </div>
                     </td>
                   </tr>
-              ))}
+                ))}
             </tbody>
           </table>
         </div>
