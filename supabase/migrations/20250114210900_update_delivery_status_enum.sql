@@ -1,7 +1,48 @@
--- Drop the view if it exists
+-- First, drop the dependent view
 DROP VIEW IF EXISTS run_supply_needs;
 
--- Create the run_supply_needs view
+-- Create the new delivery_status type
+CREATE TYPE delivery_status_new AS ENUM (
+    'upcoming',
+    'loading',
+    'preloaded',
+    'in_transit',
+    'complete',
+    'cancelled'
+);
+
+-- Handle delivery_runs table
+ALTER TABLE delivery_runs 
+    ALTER COLUMN status DROP DEFAULT;
+ALTER TABLE delivery_runs 
+    ALTER COLUMN status TYPE text;
+UPDATE delivery_runs
+SET status = 'upcoming'
+WHERE status = 'pending';
+ALTER TABLE delivery_runs 
+    ALTER COLUMN status TYPE delivery_status_new 
+    USING status::delivery_status_new;
+ALTER TABLE delivery_runs
+    ALTER COLUMN status SET DEFAULT 'upcoming';
+
+-- Handle active_delivery_runs table
+ALTER TABLE active_delivery_runs 
+    ALTER COLUMN status DROP DEFAULT;
+ALTER TABLE active_delivery_runs 
+    ALTER COLUMN status TYPE text;
+UPDATE active_delivery_runs
+SET status = 'upcoming'
+WHERE status = 'pending';
+ALTER TABLE active_delivery_runs 
+    ALTER COLUMN status TYPE delivery_status_new 
+    USING status::delivery_status_new;
+ALTER TABLE active_delivery_runs
+    ALTER COLUMN status SET DEFAULT 'upcoming';
+
+-- Drop the old type with CASCADE to handle any remaining dependencies
+DROP TYPE IF EXISTS delivery_status CASCADE;
+
+-- Recreate the run_supply_needs view
 CREATE OR REPLACE VIEW run_supply_needs AS
 WITH daily_counts AS (
     SELECT DISTINCT department_number
@@ -35,7 +76,6 @@ SELECT
     r.complete_time,
     r.depart_time,
     r.created_at,
-    -- Calculate needed supplies (par level - current total)
     COALESCE(ss.sleeves, 0) - COALESCE(st.total_sleeves, 0) as sleeves_needed,
     COALESCE(ss.caps, 0) - COALESCE(st.total_caps, 0) as caps_needed,
     COALESCE(ss.canvases, 0) - COALESCE(st.total_canvases, 0) as canvases_needed,

@@ -1,7 +1,76 @@
--- Drop the view if it exists
+-- Drop the function first since it depends on the type
+DROP FUNCTION IF EXISTS add_delivery_run;
+
+-- Drop the dependent view
 DROP VIEW IF EXISTS run_supply_needs;
 
--- Create the run_supply_needs view
+-- Create the run_type enum if it doesn't exist
+DO $$ BEGIN
+    CREATE TYPE run_type AS ENUM ('Morning', 'Afternoon', 'ADC');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Update the add_delivery_run function
+CREATE OR REPLACE FUNCTION add_delivery_run(
+  p_run_type text,
+  p_store_id uuid,
+  p_store_name text,
+  p_department_number text,
+  p_truck_type text
+) RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_next_position integer;
+  v_run_id uuid;
+  v_run_type text;
+BEGIN
+  -- Convert the run type to proper case
+  v_run_type := CASE 
+    WHEN lower(p_run_type) = 'morning' THEN 'Morning'
+    WHEN lower(p_run_type) = 'afternoon' THEN 'Afternoon'
+    WHEN lower(p_run_type) = 'adc' THEN 'ADC'
+    ELSE p_run_type
+  END;
+
+  -- Calculate next position for this run type
+  SELECT COALESCE(MAX(position), 0) + 1
+  INTO v_next_position
+  FROM active_delivery_runs
+  WHERE run_type::text = v_run_type
+  AND DATE(created_at) = CURRENT_DATE;
+
+  -- Insert new run and get the ID
+  INSERT INTO active_delivery_runs (
+    run_type,
+    store_id,
+    store_name,
+    department_number,
+    truck_type,
+    position,
+    status,
+    created_at,
+    updated_at
+  ) VALUES (
+    v_run_type::run_type,
+    p_store_id,
+    p_store_name,
+    p_department_number,
+    p_truck_type::vehicle_type,
+    v_next_position,
+    'pending',
+    now(),
+    now()
+  )
+  RETURNING id INTO v_run_id;
+
+  RETURN v_run_id;
+END;
+$$;
+
+-- Recreate the run_supply_needs view
 CREATE OR REPLACE VIEW run_supply_needs AS
 WITH daily_counts AS (
     SELECT DISTINCT department_number
@@ -35,7 +104,6 @@ SELECT
     r.complete_time,
     r.depart_time,
     r.created_at,
-    -- Calculate needed supplies (par level - current total)
     COALESCE(ss.sleeves, 0) - COALESCE(st.total_sleeves, 0) as sleeves_needed,
     COALESCE(ss.caps, 0) - COALESCE(st.total_caps, 0) as caps_needed,
     COALESCE(ss.canvases, 0) - COALESCE(st.total_canvases, 0) as canvases_needed,

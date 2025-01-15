@@ -42,11 +42,35 @@ A modern web application for managing delivery runs and store supplies efficient
 ## Recent Updates
 
 ### 2025-01-14
-- Added inline store selection dropdown
-- Implemented run creation directly from dashboard
-- Added supply needs calculation and display
-- Fixed case-sensitivity issues with run types
-- Added proper error handling and logging
+- Fixed enum handling for run types and delivery status
+- Restored original dashboard functionality with improved type safety
+- Added proper position handling for new runs
+- Updated database schema to use consistent enum values
+- Fixed store dropdown functionality
+- Improved error handling and type safety throughout
+
+## Database Migrations
+
+Recent migrations have addressed several key areas:
+- Enum standardization for run types and delivery status
+- Position handling for runs
+- Supply needs calculation improvements
+- Type safety enhancements
+
+### Key Enum Values
+
+#### Run Types
+- `morning_runs`
+- `afternoon_runs`
+- `adc_runs`
+
+#### Delivery Status
+- `upcoming` (initial status for new runs)
+- `loading`
+- `preloaded`
+- `in_transit`
+- `complete`
+- `cancelled`
 
 ## Setup Instructions
 

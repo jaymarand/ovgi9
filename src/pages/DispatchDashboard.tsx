@@ -15,7 +15,7 @@ interface DeliveryRun {
   store_id: string;
   store_name: string;
   department_number: string;
-  status: 'pending' | 'loading' | 'preloaded' | 'in_transit' | 'complete' | 'cancelled';
+  status: 'upcoming' | 'loading' | 'preloaded' | 'in_transit' | 'complete' | 'cancelled';
   type: 'Box Truck' | 'Tractor Trailer';
   sleeves_needed: number;
   caps_needed: number;
@@ -28,11 +28,39 @@ interface DeliveryRun {
   preload_time: string | null;
   complete_time: string | null;
   depart_time: string | null;
-  run_type: string;
+  run_type: 'morning_runs' | 'afternoon_runs' | 'adc_runs';
+  run_id: string;
+  position: number;
 }
 
 type RunType = 'All Runs' | 'Box Truck Runs' | 'Tractor Trailer Runs';
 type RunTime = 'Morning Runs' | 'Afternoon Runs' | 'ADC Runs';
+
+const timeSlotToRunType = (timeSlot: string): string => {
+  switch (timeSlot) {
+    case 'Morning Runs':
+      return 'morning_runs';
+    case 'Afternoon Runs':
+      return 'afternoon_runs';
+    case 'ADC Runs':
+      return 'adc_runs';
+    default:
+      return 'morning_runs';
+  }
+};
+
+const runTypeToTimeSlot = (runType: string): string => {
+  switch (runType) {
+    case 'morning_runs':
+      return 'Morning Runs';
+    case 'afternoon_runs':
+      return 'Afternoon Runs';
+    case 'adc_runs':
+      return 'ADC Runs';
+    default:
+      return 'Morning Runs';
+  }
+};
 
 export function DispatchDashboard() {
   const { user } = useAuth();
@@ -98,11 +126,10 @@ export function DispatchDashboard() {
 
   const addRun = async (store: Store, timeSlot: string) => {
     try {
-      // Extract the run type and keep proper case
-      const runType = timeSlot.split(' ')[0]; // This will be "Morning", "Afternoon", or "ADC"
+      const runType = timeSlotToRunType(timeSlot);
       
       const { data, error: addError } = await supabase.rpc('add_delivery_run', {
-        p_run_type: runType,
+        p_run_type: runType.split('_')[0], // Convert 'morning_runs' to 'morning'
         p_store_id: store.id,
         p_store_name: store.store_name,
         p_department_number: store.department_number,
@@ -118,6 +145,40 @@ export function DispatchDashboard() {
     } catch (err) {
       console.error('Failed to add run:', err);
       setError('Failed to add run');
+    }
+  };
+
+  const updateVehicleType = async (runId: string, newType: string) => {
+    try {
+      console.log('Updating run:', runId, 'to type:', newType);
+      const { error: updateError } = await supabase
+        .from('active_delivery_runs')
+        .update({ truck_type: newType })
+        .eq('id', runId);
+
+      if (updateError) {
+        console.error('Update error:', updateError);
+        throw updateError;
+      }
+      
+      // Force refresh the data
+      const { data: updatedData, error: refreshError } = await supabase
+        .from('run_supply_needs')
+        .select('*')
+        .eq('run_id', runId)
+        .single();
+
+      if (refreshError) {
+        console.error('Refresh error:', refreshError);
+      } else if (updatedData) {
+        // Update the local state immediately
+        setRuns(prev => prev.map(run => 
+          run.run_id === runId ? { ...run, type: updatedData.type } : run
+        ));
+      }
+    } catch (err) {
+      console.error('Failed to update vehicle type:', err);
+      setError('Failed to update vehicle type');
     }
   };
 
@@ -152,9 +213,9 @@ export function DispatchDashboard() {
 
   const groupRunsByTime = (runs: DeliveryRun[]): Record<RunTime, DeliveryRun[]> => {
     return {
-      'Morning Runs': runs.filter(run => run.run_type === 'Morning'),
-      'Afternoon Runs': runs.filter(run => run.run_type === 'Afternoon'),
-      'ADC Runs': runs.filter(run => run.run_type === 'ADC')
+      'Morning Runs': runs.filter(run => run.run_type === 'morning_runs'),
+      'Afternoon Runs': runs.filter(run => run.run_type === 'afternoon_runs'),
+      'ADC Runs': runs.filter(run => run.run_type === 'adc_runs')
     };
   };
 
@@ -199,87 +260,99 @@ export function DispatchDashboard() {
         </div>
       )}
 
-      {Object.entries(groupedRuns).map(([timeSlot, runs]) => (
-        <div key={timeSlot} className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">{timeSlot}</h2>
+      {Object.entries(groupedRuns).map(([timeSlot, runsInSlot]) => (
+        <div key={`section-${timeSlot}`} className="mb-8">
           <div className="bg-white rounded-lg shadow-md overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Retail Store</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sleeves</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Caps</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Canvases</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Totes</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hardlines Raw</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Softlines Raw</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">FL Driver</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Preload</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Complete</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Depart</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Type</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Sleeves</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Caps</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Canvases</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Totes</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Hardlines Raw</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Softlines Raw</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">FL Driver</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Start</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Preload</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Complete</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Depart</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {runs.map((run) => (
-                    <tr key={run.id} className="hover:bg-gray-50">
+                  <tr key={`header-${timeSlot}`} className="bg-gray-50">
+                    <td colSpan={14} className="px-4 py-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium text-gray-900">{timeSlot}</span>
+                        <button
+                          onClick={() => setShowStoreDropdown(showStoreDropdown === timeSlot ? null : timeSlot)}
+                          className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Run
+                        </button>
+                      </div>
+                      {showStoreDropdown === timeSlot && (
+                        <div className="mt-2 relative">
+                          <select
+                            onChange={(e) => {
+                              const store = stores.find(s => s.id === e.target.value);
+                              if (store) addRun(store, timeSlot);
+                            }}
+                            className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                            defaultValue=""
+                          >
+                            <option value="" disabled>Select a store...</option>
+                            {stores.map((store) => (
+                              <option key={store.id} value={store.id}>
+                                {store.store_name} ({store.department_number})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  {runsInSlot.map((run) => (
+                    <tr key={`run-${run.run_id || run.id}`} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm text-gray-900">{run.store_name}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        <div className="flex items-center">
+                        <div className="flex items-center justify-center">
                           <Truck className="h-4 w-4 mr-1" />
-                          {run.type}
+                          <select
+                            value={run.type || 'box_truck'}
+                            onChange={(e) => updateVehicleType(run.run_id, e.target.value)}
+                            className="block w-36 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md"
+                          >
+                            <option value="box_truck">Box Truck</option>
+                            <option value="tractor_trailer">Tractor Trailer</option>
+                          </select>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 text-center">
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(run.status)}`}>
-                          {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
+                          {run.status.charAt(0).toUpperCase() + run.status.slice(1).replace('_', ' ')}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.sleeves_needed}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.caps_needed}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.canvases_needed}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.totes_needed}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.hardlines_needed}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.softlines_needed}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{run.fl_driver || '--'}</td>
-                      <td className="px-4 py-3 text-sm text-blue-600">{formatTime(run.start_time)}</td>
-                      <td className="px-4 py-3 text-sm text-blue-600">{formatTime(run.preload_time)}</td>
-                      <td className="px-4 py-3 text-sm text-blue-600">{formatTime(run.complete_time)}</td>
-                      <td className="px-4 py-3 text-sm text-blue-600">{formatTime(run.depart_time)}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.sleeves_needed}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.caps_needed}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.canvases_needed}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.totes_needed}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.hardlines_needed}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.softlines_needed}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{run.fl_driver || '--'}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{formatTime(run.start_time)}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{formatTime(run.preload_time)}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{formatTime(run.complete_time)}</td>
+                      <td className="px-4 py-3 text-sm text-center text-gray-900">{formatTime(run.depart_time)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-            <div className="p-4 border-t border-gray-200">
-              <div className="relative">
-                <button 
-                  onClick={() => setShowStoreDropdown(showStoreDropdown === timeSlot ? null : timeSlot)}
-                  className="flex items-center justify-center w-full py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-md"
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  {showStoreDropdown === timeSlot ? 'Select Store' : 'Add Run'}
-                  {showStoreDropdown === timeSlot && (
-                    <ChevronDown className="h-4 w-4 ml-1" />
-                  )}
-                </button>
-                {showStoreDropdown === timeSlot && (
-                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-white rounded-md shadow-lg border border-gray-200 max-h-60 overflow-y-auto z-10">
-                    {stores.map((store) => (
-                      <button
-                        key={store.id}
-                        onClick={() => addRun(store, timeSlot)}
-                        className="w-full px-4 py-2 text-left text-sm hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
-                      >
-                        {store.store_name} - {store.department_number}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </div>
