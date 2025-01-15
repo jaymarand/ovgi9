@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { toast } from 'react-hot-toast';
 
 interface Driver {
   id: string;
@@ -15,34 +15,44 @@ interface Driver {
   created_at: string;
 }
 
-interface NewDriver {
+interface DriverFormData {
   email: string;
-  first_name: string;
-  last_name: string;
-  has_cdl: boolean;
-  cdl_number: string;
-  cdl_expiration_date: string;
+  firstName: string;
+  lastName: string;
+  hasCDL: boolean;
+  cdlNumber: string;
+  cdlExpirationDate: string;
 }
 
 export function DriverManagement() {
-  const { user } = useAuth();
   const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
   const [hideInactive, setHideInactive] = useState(false);
-  const [showAddDriver, setShowAddDriver] = useState(false);
-  const [showSetPassword, setShowSetPassword] = useState(false);
-  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [newDriver, setNewDriver] = useState<NewDriver>({
+  const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
+  const [newDriver, setNewDriver] = useState<DriverFormData>({
     email: '',
-    first_name: '',
-    last_name: '',
-    has_cdl: false,
-    cdl_number: '',
-    cdl_expiration_date: '',
+    firstName: '',
+    lastName: '',
+    hasCDL: false,
+    cdlNumber: '',
+    cdlExpirationDate: ''
   });
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    return emailRegex.test(email);
+  };
+
+  const toProperCase = (str: string): string => {
+    return str
+      .toLowerCase()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+      .trim();
+  };
 
   useEffect(() => {
     fetchDrivers();
@@ -51,29 +61,157 @@ export function DriverManagement() {
   const fetchDrivers = async () => {
     try {
       setLoading(true);
-      setError(null);
+      console.log('Fetching drivers...');
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
-
-      const { data, error } = await supabase
+      const { data, error, count } = await supabase
         .from('drivers')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (error) {
-        if (error.code === '42501') {
-          throw new Error('You do not have permission to view drivers. Please contact your administrator.');
-        }
+        console.error('Error fetching drivers:', error);
         throw error;
       }
 
+      console.log('Fetched drivers:', data);
       setDrivers(data || []);
     } catch (err: any) {
-      console.error('Error fetching drivers:', err);
+      console.error('Error in fetchDrivers:', err);
       setError(err.message);
+      toast.error(`Error loading drivers: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleDriverStatus = async (driver: Driver) => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('drivers')
+        .update({ is_active: !driver.is_active })
+        .eq('id', driver.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setDrivers(drivers.map(d => d.id === driver.id ? { ...d, is_active: !d.is_active } : d));
+      toast.success(`Driver ${driver.is_active ? 'deactivated' : 'activated'} successfully`);
+    } catch (err: any) {
+      console.error('Error toggling driver status:', err);
+      toast.error(`Error updating driver status: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateDriverCDL = async (driver: Driver, hasCDL: boolean, cdlNumber?: string, cdlExpirationDate?: string) => {
+    try {
+      setLoading(true);
+
+      // Validate CDL data if has_cdl is true
+      if (hasCDL) {
+        if (!cdlNumber?.trim()) {
+          throw new Error('CDL number is required when CDL is enabled');
+        }
+        if (!cdlExpirationDate?.trim()) {
+          throw new Error('CDL expiration date is required when CDL is enabled');
+        }
+
+        // Validate expiration date is in the future
+        const expirationDate = new Date(cdlExpirationDate);
+        if (expirationDate <= new Date()) {
+          throw new Error('CDL expiration date must be in the future');
+        }
+      }
+
+      const updateData = {
+        has_cdl: hasCDL,
+        cdl_number: hasCDL ? cdlNumber : null,
+        cdl_expiration_date: hasCDL ? cdlExpirationDate : null
+      };
+
+      const { data, error } = await supabase
+        .from('drivers')
+        .update(updateData)
+        .eq('id', driver.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setDrivers(drivers.map(d => d.id === driver.id ? { ...d, ...updateData } : d));
+      setEditingDriver(null);
+      toast.success('Driver CDL information updated successfully');
+    } catch (err: any) {
+      console.error('Error updating driver CDL:', err);
+      toast.error(`Error updating driver CDL: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createDriver = async (formData: DriverFormData) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Format names to proper case
+      const firstName = toProperCase(formData.firstName);
+      const lastName = toProperCase(formData.lastName);
+
+      // Validate email format
+      if (!validateEmail(formData.email)) {
+        throw new Error('Please enter a valid email address');
+      }
+
+      // Validate CDL data if has_cdl is true
+      if (formData.hasCDL) {
+        if (!formData.cdlNumber?.trim()) {
+          throw new Error('CDL number is required when CDL is enabled');
+        }
+        if (!formData.cdlExpirationDate?.trim()) {
+          throw new Error('CDL expiration date is required when CDL is enabled');
+        }
+
+        // Validate expiration date is in the future
+        const expirationDate = new Date(formData.cdlExpirationDate);
+        if (expirationDate <= new Date()) {
+          throw new Error('CDL expiration date must be in the future');
+        }
+      }
+
+      // Insert directly into drivers table
+      const { data: result, error: createError } = await supabase
+        .from('drivers')
+        .insert([
+          {
+            email: formData.email,
+            first_name: firstName,
+            last_name: lastName,
+            has_cdl: formData.hasCDL,
+            cdl_number: formData.hasCDL ? formData.cdlNumber : null,
+            cdl_expiration_date: formData.hasCDL ? formData.cdlExpirationDate : null,
+            is_active: true
+          }
+        ])
+        .select()
+        .single();
+
+      if (createError) {
+        console.error('Error creating driver:', createError);
+        throw createError;
+      }
+
+      console.log('Driver created successfully:', result);
+      setShowModal(false);
+      toast.success('Driver created successfully!');
+      await fetchDrivers();
+    } catch (error: any) {
+      console.error('Error creating driver:', error);
+      setError(error.message);
+      toast.error(`Error creating driver: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -81,191 +219,26 @@ export function DriverManagement() {
 
   const handleAddDriver = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
-
-      // Generate a temporary password
-      const tempPassword = Math.random().toString(36).slice(-12) + Math.random().toString(36).slice(-12);
-
-      // Call the server function to create the driver and auth user
-      const { data, error: createError } = await supabase
-        .rpc('create_driver_user', {
-          p_email: newDriver.email.trim(),
-          p_password: tempPassword,
-          p_first_name: newDriver.first_name.trim(),
-          p_last_name: newDriver.last_name.trim(),
-          p_has_cdl: newDriver.has_cdl,
-          p_cdl_number: newDriver.has_cdl ? newDriver.cdl_number.trim() : null,
-          p_cdl_expiration_date: newDriver.has_cdl ? newDriver.cdl_expiration_date : null
-        });
-
-      if (createError) {
-        throw new Error(createError.message);
-      }
-
-      // Show success message
-      setError(`Driver created successfully. Please set their password immediately.`);
-      
-      setNewDriver({
-        email: '',
-        first_name: '',
-        last_name: '',
-        has_cdl: false,
-        cdl_number: '',
-        cdl_expiration_date: '',
-      });
-      setShowAddDriver(false);
-      await fetchDrivers();
-
-      // Automatically open set password modal for the new driver
-      if (data && data.driver) {
-        setSelectedDriver(data.driver);
-        setShowSetPassword(true);
-      }
-
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    await createDriver(newDriver);
   };
 
-  const handleDeleteDriver = async (driverId: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
-
-      const userRole = session.user.user_metadata.role;
-      if (userRole !== 'dispatcher') {
-        throw new Error('Only dispatchers can delete drivers');
-      }
-
-      const { error: deleteError } = await supabase
-        .from('drivers')
-        .delete()
-        .eq('id', driverId);
-
-      if (deleteError) {
-        if (deleteError.code === '42501') {
-          throw new Error('You do not have permission to delete drivers. Please contact your administrator.');
-        }
-        throw new Error(deleteError.message);
-      }
-
-      await fetchDrivers();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  const resetForm = () => {
+    setNewDriver({
+      email: '',
+      firstName: '',
+      lastName: '',
+      hasCDL: false,
+      cdlNumber: '',
+      cdlExpirationDate: ''
+    });
+    setError(null);
   };
-
-  const handleToggleStatus = async (driver: Driver) => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
-
-      const userRole = session.user.user_metadata.role;
-      if (userRole !== 'dispatcher') {
-        throw new Error('Only dispatchers can modify driver status');
-      }
-
-      const { error: updateError } = await supabase
-        .from('drivers')
-        .update({ is_active: !driver.is_active })
-        .eq('id', driver.id);
-
-      if (updateError) {
-        if (updateError.code === '42501') {
-          throw new Error('You do not have permission to modify drivers. Please contact your administrator.');
-        }
-        throw new Error(updateError.message);
-      }
-
-      await fetchDrivers();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDriver) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      if (password !== confirmPassword) {
-        throw new Error('Passwords do not match');
-      }
-
-      if (password.length < 8) {
-        throw new Error('Password must be at least 8 characters long');
-      }
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
-
-      // Call the server-side function to update the password
-      const { data, error: updateError } = await supabase
-        .rpc('update_user_password', {
-          user_id: selectedDriver.user_id,
-          new_password: password
-        });
-
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
-
-      setPassword('');
-      setConfirmPassword('');
-      setSelectedDriver(null);
-      setShowSetPassword(false);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const filteredDrivers = hideInactive 
-    ? drivers.filter(d => d.is_active)
-    : drivers;
-
-  if (loading && !showAddDriver) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading drivers...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center space-x-4">
-          <h1 className="text-2xl font-bold">Driver Management</h1>
+        <h1 className="text-2xl font-bold">Driver Management</h1>
+        <div className="flex items-center gap-4">
           <label className="flex items-center space-x-2">
             <input
               type="checkbox"
@@ -275,250 +248,250 @@ export function DriverManagement() {
             />
             <span className="text-sm text-gray-700">Hide Inactive Drivers</span>
           </label>
+          <button
+            onClick={() => {
+              setShowModal(true);
+              resetForm();
+            }}
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          >
+            Add Driver
+          </button>
         </div>
-        <button
-          onClick={() => setShowAddDriver(true)}
-          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-        >
-          Add Driver
-        </button>
       </div>
 
       {error && (
-        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
-          <p>{error}</p>
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
         </div>
       )}
 
-      {showAddDriver && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">Add New Driver</h3>
-              <button
-                onClick={() => setShowAddDriver(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleAddDriver} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={newDriver.email}
-                  onChange={(e) => setNewDriver({ ...newDriver, email: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">First Name</label>
-                <input
-                  type="text"
-                  required
-                  value={newDriver.first_name}
-                  onChange={(e) => setNewDriver({ ...newDriver, first_name: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Last Name</label>
-                <input
-                  type="text"
-                  required
-                  value={newDriver.last_name}
-                  onChange={(e) => setNewDriver({ ...newDriver, last_name: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="flex items-center">
+      {loading && !editingDriver ? (
+        <div className="text-center py-4">Loading...</div>
+      ) : (
+        <div className="bg-white shadow-md rounded my-6">
+          <table className="min-w-full table-auto">
+            <thead>
+              <tr className="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
+                <th className="py-3 px-6 text-left">Name</th>
+                <th className="py-3 px-6 text-left">Email</th>
+                <th className="py-3 px-6 text-center">CDL Status</th>
+                <th className="py-3 px-6 text-center">Status</th>
+                <th className="py-3 px-6 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="text-gray-600 text-sm">
+              {drivers
+                .filter(driver => !hideInactive || driver.is_active)
+                .map((driver) => (
+                  <tr key={driver.id} className="border-b border-gray-200 hover:bg-gray-100">
+                    <td className="py-3 px-6 text-left">
+                      {driver.first_name} {driver.last_name}
+                    </td>
+                    <td className="py-3 px-6 text-left">{driver.email}</td>
+                    <td className="py-3 px-6 text-center">
+                      {editingDriver?.id === driver.id ? (
+                        <div className="flex flex-col space-y-2">
+                          <label className="flex items-center justify-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={editingDriver.has_cdl}
+                              onChange={(e) => setEditingDriver({
+                                ...editingDriver,
+                                has_cdl: e.target.checked,
+                                cdl_number: e.target.checked ? editingDriver.cdl_number : null,
+                                cdl_expiration_date: e.target.checked ? editingDriver.cdl_expiration_date : null
+                              })}
+                              className="rounded border-gray-300 text-blue-600"
+                            />
+                            <span>Has CDL</span>
+                          </label>
+                          {editingDriver.has_cdl && (
+                            <>
+                              <input
+                                type="text"
+                                required={editingDriver.has_cdl}
+                                placeholder="CDL Number"
+                                value={editingDriver.cdl_number || ''}
+                                onChange={(e) => setEditingDriver({
+                                  ...editingDriver,
+                                  cdl_number: e.target.value.trim()
+                                })}
+                                className="px-2 py-1 border rounded"
+                              />
+                              <input
+                                type="date"
+                                required={editingDriver.has_cdl}
+                                min={new Date().toISOString().split('T')[0]}
+                                value={editingDriver.cdl_expiration_date || ''}
+                                onChange={(e) => setEditingDriver({
+                                  ...editingDriver,
+                                  cdl_expiration_date: e.target.value
+                                })}
+                                className="px-2 py-1 border rounded"
+                              />
+                              <div className="flex justify-center space-x-2">
+                                <button
+                                  onClick={() => updateDriverCDL(
+                                    driver,
+                                    editingDriver.has_cdl,
+                                    editingDriver.cdl_number || undefined,
+                                    editingDriver.cdl_expiration_date || undefined
+                                  )}
+                                  className="bg-green-500 text-white px-2 py-1 rounded text-xs"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => setEditingDriver(null)}
+                                  className="bg-gray-500 text-white px-2 py-1 rounded text-xs"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setEditingDriver(driver)}
+                          className={`${
+                            driver.has_cdl
+                              ? 'bg-green-200 text-green-700'
+                              : 'bg-gray-200 text-gray-700'
+                          } py-1 px-3 rounded-full text-xs hover:opacity-75`}
+                        >
+                          {driver.has_cdl ? 'CDL' : 'No CDL'}
+                        </button>
+                      )}
+                    </td>
+                    <td className="py-3 px-6 text-center">
+                      <button
+                        onClick={() => toggleDriverStatus(driver)}
+                        className={`${
+                          driver.is_active
+                            ? 'bg-green-200 text-green-700'
+                            : 'bg-red-200 text-red-700'
+                        } py-1 px-3 rounded-full text-xs hover:opacity-75`}
+                      >
+                        {driver.is_active ? 'Active' : 'Inactive'}
+                      </button>
+                    </td>
+                    <td className="py-3 px-6 text-center">
+                      <div className="flex justify-center items-center">
+                        <button
+                          onClick={() => setEditingDriver(driver)}
+                          className="text-blue-500 hover:text-blue-700"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-4">Add New Driver</h2>
+            <form onSubmit={handleAddDriver}>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Email</label>
                   <input
-                    type="checkbox"
-                    checked={newDriver.has_cdl}
-                    onChange={(e) => setNewDriver({ ...newDriver, has_cdl: e.target.checked })}
-                    className="rounded border-gray-300 text-blue-600"
+                    type="email"
+                    required
+                    pattern="[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                    title="Please enter a valid email address"
+                    value={newDriver.email}
+                    onChange={(e) => setNewDriver({ ...newDriver, email: e.target.value.toLowerCase().trim() })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   />
-                  <span className="ml-2 text-sm text-gray-700">Has CDL</span>
-                </label>
-              </div>
-              {newDriver.has_cdl && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">CDL Number</label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">First Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newDriver.firstName}
+                    onChange={(e) => setNewDriver({ ...newDriver, firstName: toProperCase(e.target.value) })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Last Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newDriver.lastName}
+                    onChange={(e) => setNewDriver({ ...newDriver, lastName: toProperCase(e.target.value) })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="flex items-center">
                     <input
-                      type="text"
-                      required
-                      value={newDriver.cdl_number}
-                      onChange={(e) => setNewDriver({ ...newDriver, cdl_number: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      type="checkbox"
+                      checked={newDriver.hasCDL}
+                      onChange={(e) => setNewDriver({ ...newDriver, hasCDL: e.target.checked })}
+                      className="rounded border-gray-300 text-blue-600"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">CDL Expiration Date</label>
-                    <input
-                      type="date"
-                      required
-                      value={newDriver.cdl_expiration_date}
-                      onChange={(e) => setNewDriver({ ...newDriver, cdl_expiration_date: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-                </>
-              )}
-              <div className="flex justify-end space-x-2 mt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowAddDriver(false)}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
-                >
-                  {loading ? 'Adding...' : 'Add Driver'}
-                </button>
+                    <span className="ml-2 text-sm text-gray-700">Has CDL</span>
+                  </label>
+                </div>
+                {newDriver.hasCDL && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">CDL Number</label>
+                      <input
+                        type="text"
+                        required
+                        value={newDriver.cdlNumber}
+                        onChange={(e) => setNewDriver({ ...newDriver, cdlNumber: e.target.value.trim() })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">CDL Expiration Date</label>
+                      <input
+                        type="date"
+                        required
+                        min={new Date().toISOString().split('T')[0]}
+                        value={newDriver.cdlExpirationDate}
+                        onChange={(e) => setNewDriver({ ...newDriver, cdlExpirationDate: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showSetPassword && selectedDriver && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">Set Password for {selectedDriver.first_name} {selectedDriver.last_name}</h3>
-              <button
-                onClick={() => {
-                  setShowSetPassword(false);
-                  setSelectedDriver(null);
-                  setPassword('');
-                  setConfirmPassword('');
-                }}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleSetPassword} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">New Password</label>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  minLength={8}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Confirm Password</label>
-                <input
-                  type="password"
-                  required
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  minLength={8}
-                />
-              </div>
-              <div className="flex justify-end space-x-2 mt-4">
+              <div className="mt-6 flex justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => {
-                    setShowSetPassword(false);
-                    setSelectedDriver(null);
-                    setPassword('');
-                    setConfirmPassword('');
+                    setShowModal(false);
+                    resetForm();
                   }}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                  className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
+                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50"
                 >
-                  {loading ? 'Setting Password...' : 'Set Password'}
+                  {loading ? 'Creating...' : 'Create Driver'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CDL</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredDrivers.map((driver) => (
-              <tr key={driver.id} className={!driver.is_active ? 'bg-gray-50' : ''}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {driver.first_name} {driver.last_name}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {driver.email}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <button
-                    onClick={() => handleToggleStatus(driver)}
-                    className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer transition-colors duration-200 ${
-                      driver.is_active 
-                        ? 'bg-green-100 text-green-800 hover:bg-green-200' 
-                        : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
-                    }`}
-                  >
-                    {driver.is_active ? 'Active' : 'Inactive'}
-                  </button>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                    driver.has_cdl ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {driver.has_cdl ? `CDL: ${driver.cdl_number}` : 'No CDL'}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                  <button className="text-indigo-600 hover:text-indigo-900 mr-4">
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedDriver(driver);
-                      setShowSetPassword(true);
-                    }}
-                    className="text-blue-600 hover:text-blue-900 mr-4"
-                  >
-                    Set Password
-                  </button>
-                  <button 
-                    onClick={() => handleDeleteDriver(driver.id)}
-                    className="text-red-600 hover:text-red-900"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
