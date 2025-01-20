@@ -6,5 +6,5 @@ SELECT
     column_default,
     character_maximum_length
 FROM information_schema.columns 
-WHERE table_name = 'stores'
+WHERE table_name = 'store_supplies'
 ORDER BY ordinal_position;

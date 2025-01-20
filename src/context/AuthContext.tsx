@@ -8,6 +8,7 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   userRole: string | null;
+  checkSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -15,7 +16,8 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   loading: true,
   signOut: async () => {},
-  userRole: null
+  userRole: null,
+  checkSession: async () => {}
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -24,14 +26,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null);
 
+  const checkSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    setSession(session);
+    setUser(session?.user ?? null);
+    setUserRole(session?.user?.user_metadata?.role ?? null);
+  };
+
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setUserRole(session?.user?.user_metadata?.role ?? null);
-      setLoading(false);
-    });
+    checkSession();
+    setLoading(false);
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -62,7 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     session,
     loading,
     signOut,
-    userRole
+    userRole,
+    checkSession
   };
 
   return (

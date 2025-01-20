@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Users, Truck, Package, AlertCircle, Plus, ChevronDown } from 'lucide-react';
+import { Users, Truck, Package, AlertCircle, Plus, ChevronDown, Trash2 } from 'lucide-react';
 
 interface Store {
   id: string;
@@ -91,16 +91,67 @@ export function DispatchDashboard() {
           schema: 'public',
           table: 'active_delivery_runs'
         },
-        (payload) => {
+        async (payload) => {
           console.log('Run update received:', payload);
-          // Refresh the runs data when any change occurs
-          fetchRuns();
+          
+          if (payload.eventType === 'UPDATE') {
+            const { data: updatedRun, error } = await supabase
+              .from('run_supply_needs')
+              .select('*')
+              .eq('run_id', payload.new.id)
+              .single();
+
+            if (!error && updatedRun) {
+              setRuns(prevRuns => 
+                prevRuns.map(run => 
+                  run.run_id === updatedRun.run_id ? updatedRun : run
+                )
+              );
+            }
+          } else if (payload.eventType === 'DELETE') {
+            setRuns(prevRuns => prevRuns.filter(run => run.run_id !== payload.old.id));
+          } else if (payload.eventType === 'INSERT') {
+            const { data: newRun, error } = await supabase
+              .from('run_supply_needs')
+              .select('*')
+              .eq('run_id', payload.new.id)
+              .single();
+
+            if (!error && newRun) {
+              setRuns(prevRuns => [...prevRuns, newRun]);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    // Subscribe to changes in run_supply_needs view
+    const supplyNeedsSubscription = supabase
+      .channel('run_supply_needs_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'run_supply_needs'
+        },
+        (payload) => {
+          console.log('Supply needs update received:', payload);
+          
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            setRuns(prevRuns => 
+              prevRuns.map(run => 
+                run.run_id === payload.new.run_id ? { ...run, ...payload.new } : run
+              )
+            );
+          }
         }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(runsSubscription);
+      supabase.removeChannel(supplyNeedsSubscription);
     };
   }, []);
 
@@ -110,9 +161,24 @@ export function DispatchDashboard() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'active_delivery_runs' },
-        (payload) => {
+        async (payload) => {
           console.log('Realtime update received:', payload);
-          fetchRuns();
+          
+          if (payload.eventType === 'UPDATE') {
+            const { data: updatedRun, error } = await supabase
+              .from('run_supply_needs')
+              .select('*')
+              .eq('run_id', payload.new.id)
+              .single();
+
+            if (!error && updatedRun) {
+              setRuns(prevRuns => 
+                prevRuns.map(run => 
+                  run.run_id === updatedRun.run_id ? updatedRun : run
+                )
+              );
+            }
+          }
         }
       )
       .subscribe();
@@ -142,7 +208,6 @@ export function DispatchDashboard() {
       const { data, error: runsError } = await supabase
         .from('run_supply_needs')
         .select('*')
-        .neq('status', 'cancelled')
         .order('created_at', { ascending: false });
 
       if (runsError) throw runsError;
@@ -271,6 +336,20 @@ export function DispatchDashboard() {
     }
   };
 
+  const clearRuns = async () => {
+    try {
+      const { error: clearError } = await supabase.rpc('clear_active_runs');
+      
+      if (clearError) throw clearError;
+      
+      // Refresh runs after clearing
+      await fetchRuns();
+    } catch (err) {
+      console.error('Failed to clear runs:', err);
+      setError('Failed to clear runs');
+    }
+  };
+
   const getStatusColor = (status: DeliveryRun['status']) => {
     switch (status) {
       case 'complete':
@@ -323,7 +402,16 @@ export function DispatchDashboard() {
   return (
     <div className="max-w-[95%] mx-auto">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Dispatch Dashboard</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold text-gray-900">Dispatch Dashboard</h1>
+          <button
+            onClick={clearRuns}
+            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-red-600 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Clear Runs
+          </button>
+        </div>
         <div className="flex gap-2">
           {(['All Runs', 'Box Truck Runs', 'Tractor Trailer Runs'] as RunType[]).map((type) => (
             <button

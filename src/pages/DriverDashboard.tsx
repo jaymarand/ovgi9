@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Truck, Package, AlertCircle, Loader } from 'lucide-react';
+import { Truck, Package, AlertCircle, Loader, RotateCcw } from 'lucide-react';
 
 interface Driver {
   id: string;
@@ -243,6 +243,36 @@ export function DriverDashboard() {
     }
   };
 
+  const resetRun = async (runId: string) => {
+    try {
+      console.log('Resetting run:', runId);
+      const currentTime = new Date().toISOString();
+      const updateData = {
+        status: 'upcoming',
+        updated_at: currentTime,
+        start_time: null,
+        preload_time: null,
+        depart_time: null,
+        complete_time: null
+      };
+
+      const { error: updateError } = await supabase
+        .from('active_delivery_runs')
+        .update(updateData)
+        .eq('id', runId);
+
+      if (updateError) {
+        console.error('Error resetting run:', updateError);
+        throw updateError;
+      }
+
+      await fetchRuns();
+    } catch (err) {
+      console.error('Error resetting run:', err);
+      setError('Failed to reset run');
+    }
+  };
+
   const getStatusColor = (status: DeliveryRun['status']) => {
     switch (status) {
       case 'complete':
@@ -277,6 +307,19 @@ export function DriverDashboard() {
     console.log('Getting action button for run:', run);
     console.log('Selected run:', selectedRun);
 
+    const resetButton = (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          resetRun(run.run_id);
+        }}
+        className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 flex items-center gap-2"
+      >
+        <RotateCcw className="h-4 w-4" />
+        Reset
+      </button>
+    );
+
     switch (run.status) {
       case 'upcoming':
         return (
@@ -291,6 +334,7 @@ export function DriverDashboard() {
               <Package className="h-4 w-4" />
               Start Loading
             </button>
+            {resetButton}
           </div>
         );
       case 'loading':
@@ -306,6 +350,7 @@ export function DriverDashboard() {
               <Loader className="h-4 w-4" />
               Stop Loading
             </button>
+            {resetButton}
           </div>
         );
       case 'preloaded':
@@ -320,6 +365,7 @@ export function DriverDashboard() {
             >
               Depart
             </button>
+            {resetButton}
           </div>
         );
       case 'in_transit':
@@ -334,6 +380,13 @@ export function DriverDashboard() {
             >
               Complete
             </button>
+            {resetButton}
+          </div>
+        );
+      case 'complete':
+        return (
+          <div className="flex flex-wrap gap-2 mt-4">
+            {resetButton}
           </div>
         );
       default:
