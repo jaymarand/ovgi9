@@ -67,7 +67,7 @@ const runTypeToTimeSlot = (runType: string): string => {
 };
 
 export function DispatchDashboard() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [runs, setRuns] = useState<DeliveryRun[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [activeDrivers, setActiveDrivers] = useState<Driver[]>([]);
@@ -77,13 +77,23 @@ export function DispatchDashboard() {
   const [showStoreDropdown, setShowStoreDropdown] = useState<string | null>(null); // timeSlot when dropdown is open
 
   useEffect(() => {
-    fetchRuns();
-    fetchStores();
-    fetchActiveDrivers();
+    // Enable realtime subscriptions for this session
+    supabase.realtime.setAuth(session?.access_token || null);
 
-    // Subscribe to changes in active_delivery_runs
-    const runsSubscription = supabase
-      .channel('active_delivery_runs_changes')
+    const fetchInitialData = async () => {
+      await Promise.all([
+        fetchRuns(),
+        fetchStores(),
+        fetchActiveDrivers()
+      ]);
+      console.log('Initial data fetched');
+    };
+
+    fetchInitialData();
+
+    // Single channel for all subscriptions
+    const channel = supabase
+      .channel('dispatch_dashboard')
       .on(
         'postgres_changes',
         {
@@ -94,99 +104,46 @@ export function DispatchDashboard() {
         async (payload) => {
           console.log('Run update received:', payload);
           
-          if (payload.eventType === 'UPDATE') {
-            const { data: updatedRun, error } = await supabase
-              .from('run_supply_needs')
-              .select('*')
-              .eq('run_id', payload.new.id)
-              .single();
+          // Always fetch the complete run data from run_supply_needs view
+          // This ensures we have all the calculated fields
+          const { data: updatedRun, error } = await supabase
+            .from('run_supply_needs')
+            .select('*')
+            .eq('run_id', payload.eventType === 'DELETE' ? payload.old.id : payload.new.id)
+            .single();
 
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
             if (!error && updatedRun) {
-              setRuns(prevRuns => 
-                prevRuns.map(run => 
-                  run.run_id === updatedRun.run_id ? updatedRun : run
-                )
-              );
+              setRuns(prevRuns => {
+                const index = prevRuns.findIndex(run => run.run_id === updatedRun.run_id);
+                if (index === -1) {
+                  return [...prevRuns, updatedRun];
+                } else {
+                  const newRuns = [...prevRuns];
+                  newRuns[index] = updatedRun;
+                  return newRuns;
+                }
+              });
+              console.log('Updated/Inserted run in state:', updatedRun);
+            } else {
+              console.error('Error fetching updated run:', error);
             }
           } else if (payload.eventType === 'DELETE') {
             setRuns(prevRuns => prevRuns.filter(run => run.run_id !== payload.old.id));
-          } else if (payload.eventType === 'INSERT') {
-            const { data: newRun, error } = await supabase
-              .from('run_supply_needs')
-              .select('*')
-              .eq('run_id', payload.new.id)
-              .single();
-
-            if (!error && newRun) {
-              setRuns(prevRuns => [...prevRuns, newRun]);
-            }
+            console.log('Removed run from state:', payload.old.id);
           }
         }
       )
-      .subscribe();
+      .subscribe(status => {
+        console.log('Subscription status:', status);
+      });
 
-    // Subscribe to changes in run_supply_needs view
-    const supplyNeedsSubscription = supabase
-      .channel('run_supply_needs_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'run_supply_needs'
-        },
-        (payload) => {
-          console.log('Supply needs update received:', payload);
-          
-          if (payload.eventType === 'UPDATE' && payload.new) {
-            setRuns(prevRuns => 
-              prevRuns.map(run => 
-                run.run_id === payload.new.run_id ? { ...run, ...payload.new } : run
-              )
-            );
-          }
-        }
-      )
-      .subscribe();
-
+    // Cleanup function
     return () => {
-      supabase.removeChannel(runsSubscription);
-      supabase.removeChannel(supplyNeedsSubscription);
-    };
-  }, []);
-
-  const setupRealtimeSubscription = () => {
-    const channel = supabase
-      .channel('dispatch-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'active_delivery_runs' },
-        async (payload) => {
-          console.log('Realtime update received:', payload);
-          
-          if (payload.eventType === 'UPDATE') {
-            const { data: updatedRun, error } = await supabase
-              .from('run_supply_needs')
-              .select('*')
-              .eq('run_id', payload.new.id)
-              .single();
-
-            if (!error && updatedRun) {
-              setRuns(prevRuns => 
-                prevRuns.map(run => 
-                  run.run_id === updatedRun.run_id ? updatedRun : run
-                )
-              );
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
+      console.log('Cleaning up subscriptions');
       supabase.removeChannel(channel);
     };
-  };
+  }, [session?.access_token]); // Add session token as dependency
 
   const fetchStores = async () => {
     try {
@@ -208,7 +165,7 @@ export function DispatchDashboard() {
       const { data, error: runsError } = await supabase
         .from('run_supply_needs')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('position', { ascending: true });
 
       if (runsError) throw runsError;
       console.log('Fetched runs:', data);
@@ -242,22 +199,26 @@ export function DispatchDashboard() {
 
   const addRun = async (store: Store, timeSlot: string) => {
     try {
-      const runType = timeSlotToRunType(timeSlot);
-      
-      const { data, error: addError } = await supabase.rpc('add_delivery_run', {
-        p_run_type: runType.split('_')[0], // Convert 'morning_runs' to 'morning'
-        p_store_id: store.id,
-        p_store_name: store.store_name,
-        p_department_number: store.department_number,
-        p_truck_type: 'box_truck'
-      });
+      // Convert 'Morning Runs' to just 'morning'
+      const runType = timeSlot.split(' ')[0].toLowerCase();
+      console.log('Adding run:', { runType, store });
+
+      const { data, error: addError } = await supabase
+        .rpc('add_delivery_run', {
+          p_run_type: runType,
+          p_store_id: store.id,
+          p_store_name: store.store_name,
+          p_department_number: store.department_number,
+          p_truck_type: 'box_truck'  // Match the vehicle_type enum
+        });
 
       if (addError) {
         console.error('Add run error:', addError);
         throw addError;
       }
+
+      console.log('Run added successfully:', data);
       setShowStoreDropdown(null);
-      await fetchRuns();
     } catch (err) {
       console.error('Failed to add run:', err);
       setError('Failed to add run');

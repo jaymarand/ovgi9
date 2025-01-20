@@ -28,14 +28,14 @@ export function StorePage() {
   const [formData, setFormData] = useState<Partial<ContainerCount>>({
     opener_name: '',
     arrival_time: '',
-    donation_count: 0,
-    trailer_fullness: 0,
-    hardlines_raw: 0,
-    softlines_raw: 0,
-    canvases: 0,
-    sleeves: 0,
-    caps: 0,
-    totes: 0
+    donation_count: '',
+    trailer_fullness: '',
+    hardlines_raw: '',
+    softlines_raw: '',
+    canvases: '',
+    sleeves: '',
+    caps: '',
+    totes: ''
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,9 +66,7 @@ export function StorePage() {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'arrival_time' || name === 'opener_name' 
-        ? value 
-        : (parseInt(value) || 0)
+      [name]: value
     }));
   };
 
@@ -81,6 +79,27 @@ export function StorePage() {
 
     if (!formData.opener_name || !formData.arrival_time) {
       setError('Please fill in opener name and arrival time');
+      return;
+    }
+
+    // Check if any supply counts are missing or empty
+    const requiredFields = [
+      'donation_count',
+      'trailer_fullness',
+      'hardlines_raw',
+      'softlines_raw',
+      'canvases',
+      'sleeves',
+      'caps',
+      'totes'
+    ];
+
+    const missingFields = requiredFields.filter(field => 
+      !formData[field as keyof ContainerCount]
+    );
+
+    if (missingFields.length > 0) {
+      setError(`Please fill in all supply counts: ${missingFields.join(', ')}`);
       return;
     }
 
@@ -103,14 +122,14 @@ export function StorePage() {
         store_name: store.store_name,
         opener_name: formData.opener_name,
         arrival_time: arrivalDate.toISOString(),
-        donation_count: formData.donation_count || 0,
-        trailer_fullness: formData.trailer_fullness || 0,
-        hardlines_raw: formData.hardlines_raw || 0,
-        softlines_raw: formData.softlines_raw || 0,
-        canvases: formData.canvases || 0,
-        sleeves: formData.sleeves || 0,
-        caps: formData.caps || 0,
-        totes: formData.totes || 0
+        donation_count: parseInt(formData.donation_count as string) || 0,
+        trailer_fullness: parseInt(formData.trailer_fullness as string) || 0,
+        hardlines_raw: parseInt(formData.hardlines_raw as string) || 0,
+        softlines_raw: parseInt(formData.softlines_raw as string) || 0,
+        canvases: parseInt(formData.canvases as string) || 0,
+        sleeves: parseInt(formData.sleeves as string) || 0,
+        caps: parseInt(formData.caps as string) || 0,
+        totes: parseInt(formData.totes as string) || 0
       };
 
       const { error: insertError } = await supabase
@@ -124,14 +143,14 @@ export function StorePage() {
       setFormData({
         opener_name: '',
         arrival_time: '',
-        donation_count: 0,
-        trailer_fullness: 0,
-        hardlines_raw: 0,
-        softlines_raw: 0,
-        canvases: 0,
-        sleeves: 0,
-        caps: 0,
-        totes: 0
+        donation_count: '',
+        trailer_fullness: '',
+        hardlines_raw: '',
+        softlines_raw: '',
+        canvases: '',
+        sleeves: '',
+        caps: '',
+        totes: ''
       });
       
       alert('Container counts submitted successfully');
@@ -221,7 +240,7 @@ export function StorePage() {
 
           <div>
             <label htmlFor="donation_count" className="block text-sm font-medium text-gray-700">
-              Donation Count
+              Donation Count *
             </label>
             <input
               type="number"
@@ -231,12 +250,13 @@ export function StorePage() {
               value={formData.donation_count}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
 
           <div>
             <label htmlFor="trailer_fullness" className="block text-sm font-medium text-gray-700">
-              Trailer Fullness (%)
+              Trailer Fullness (%) *
             </label>
             <input
               type="number"
@@ -247,12 +267,13 @@ export function StorePage() {
               value={formData.trailer_fullness}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
 
           <div>
             <label htmlFor="hardlines_raw" className="block text-sm font-medium text-gray-700">
-              Hardlines Raw
+              Hardlines Raw *
             </label>
             <input
               type="number"
@@ -262,12 +283,13 @@ export function StorePage() {
               value={formData.hardlines_raw}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
 
           <div>
             <label htmlFor="softlines_raw" className="block text-sm font-medium text-gray-700">
-              Softlines Raw
+              Softlines Raw *
             </label>
             <input
               type="number"
@@ -277,12 +299,13 @@ export function StorePage() {
               value={formData.softlines_raw}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
 
           <div>
             <label htmlFor="canvases" className="block text-sm font-medium text-gray-700">
-              Canvases
+              Canvases *
             </label>
             <input
               type="number"
@@ -292,12 +315,13 @@ export function StorePage() {
               value={formData.canvases}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
 
           <div>
             <label htmlFor="sleeves" className="block text-sm font-medium text-gray-700">
-              Sleeves
+              Sleeves *
             </label>
             <input
               type="number"
@@ -307,12 +331,13 @@ export function StorePage() {
               value={formData.sleeves}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
 
           <div>
             <label htmlFor="caps" className="block text-sm font-medium text-gray-700">
-              Caps
+              Caps *
             </label>
             <input
               type="number"
@@ -322,12 +347,13 @@ export function StorePage() {
               value={formData.caps}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
 
           <div>
             <label htmlFor="totes" className="block text-sm font-medium text-gray-700">
-              Totes
+              Totes *
             </label>
             <input
               type="number"
@@ -337,6 +363,7 @@ export function StorePage() {
               value={formData.totes}
               onChange={handleInputChange}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
             />
           </div>
         </div>
